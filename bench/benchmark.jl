@@ -16,6 +16,7 @@ function benchmark_ms( size_i::Int, myfunc, eltype::Type)
         start = time_ns()
         for i=1:20
             myfunc(a, temp)
+            KernelAbstractions.synchronize(backend)
         end
         KernelAbstractions.synchronize(backend)
         endtime = time_ns()
@@ -40,9 +41,9 @@ function benchmark_ms_2d(size_in1::Int, size_in2::Int, myfunc, eltype::Type)
         KernelAbstractions.synchronize(backend)
         start = time_ns()
         for j = 1:20
+            KernelAbstractions.synchronize(backend)
             myfunc(a, temp)
         end
-        KernelAbstractions.synchronize(backend)
         endtime = time_ns()
         thisduration = (endtime - start) / 1e6
         elapsed += thisduration

@@ -1,5 +1,6 @@
-@kernel inbounds=true cpu=false unsafe_indices=true function _mapreduce_block!(@Const(src), dst, f, op, neutral)
-
+@kernel inbounds=true cpu=false unsafe_indices=true function _mapreduce_block!(
+    @Const(src), dst, f, op, neutral,
+)
     @uniform N = @groupsize()[1]
     sdata = @localmem eltype(dst) (N,)
 
@@ -14,31 +15,62 @@
     iblock = @index(Group, Linear) - 0x1
     ithread = @index(Local, Linear) - 0x1
 
-    i = ithread + iblock * (N * 0x2)
+    reg_accum = neutral
+    i = (ithread * 0x4) + iblock * (N * 0x4) # each thread handles four elements
     if i >= len
         sdata[ithread + 0x1] = neutral
-    elseif i + N >= len
-        sdata[ithread + 0x1] = f(src[i + 0x1])
+    elseif i + N  >= len
+        for j in 0x0:0x3
+            idx = i + j
+            if idx < len
+                # reg_accum = op(reg_accum, f(src[idx + 0x1]))
+                reg_accum += src[idx + 0x1]
+            end
+        end
     else
-        sdata[ithread + 0x1] = op(f(src[i + 0x1]), f(src[i + N + 0x1]))
+        reg_accum = op(f(src[i + 0x1]),
+                       f(src[i + 0x2]),
+                       f(src[i + 0x3]),
+                       f(src[i + 0x4]))
+        # reg_accum = src[i + 0x1] + src[i + 0x2] + src[i + 0x3] + src[i + 0x4]
     end
 
+    sdata[ithread + 0x1] = reg_accum
+    # elseif i + N >= len
+    #     sdata[ithread + 0x1] = f(src[i + 0x1])
+    # else
+    #     sdata[ithread + 0x1] = op(f(src[i + 0x1]), f(src[i + N + 0x1]))
+    # end
     @synchronize()
 
-    @inline reduce_group!(@context, op, sdata, N, ithread)
+    @uniform WARP = W
+    @inline reduce_group!(@context, op, sdata, N, ithread, WARP)
+
+
+    # step = N
+    # while step > 0
+    #     if N >= step
+    #         if ithread < step ÷ 2
+    #             sdata[ithread + 0x1] =
+    #                 op(sdata[ithread + 0x1],
+    #                    sdata[ithread + step ÷ 2 + 0x1])
+    #         end
+    #         @synchronize()
+    #     end
+    #     step ÷= 2
+    # end
 
     # Code below would work on NVidia GPUs with warp size of 32, but create race conditions and
     # return incorrect results on Intel Graphics. It would be useful to have a way to statically
     # query the warp size at compile time
-    #
+    
     # if ithread < 32
-    #     N >= 64 && (sdata[ithread + 1] = op(sdata[ithread + 1], sdata[ithread + 32 + 1]))
-    #     N >= 32 && (sdata[ithread + 1] = op(sdata[ithread + 1], sdata[ithread + 16 + 1]))
-    #     N >= 16 && (sdata[ithread + 1] = op(sdata[ithread + 1], sdata[ithread + 8 + 1]))
-    #     N >= 8 && (sdata[ithread + 1] = op(sdata[ithread + 1], sdata[ithread + 4 + 1]))
-    #     N >= 4 && (sdata[ithread + 1] = op(sdata[ithread + 1], sdata[ithread + 2 + 1]))
-    #     N >= 2 && (sdata[ithread + 1] = op(sdata[ithread + 1], sdata[ithread + 1 + 1]))
-    # end
+    #   N >= 64 && (sdata[ithread + 1] = op(sdata[ithread + 1], sdata[ithread + 32 + 1]))
+    #   N >= 32 && (sdata[ithread + 1] = op(sdata[ithread + 1], sdata[ithread + 16 + 1]))
+    #   N >= 16 && (sdata[ithread + 1] = op(sdata[ithread + 1], sdata[ithread + 8 + 1]))
+    #   N >= 8 && (sdata[ithread + 1] = op(sdata[ithread + 1], sdata[ithread + 4 + 1]))
+    #   N >= 4 && (sdata[ithread + 1] = op(sdata[ithread + 1], sdata[ithread + 2 + 1]))
+    #   N >= 2 && (sdata[ithread + 1] = op(sdata[ithread + 1], sdata[ithread + 1 + 1]))
 
     if ithread == 0x0
         dst[iblock + 0x1] = sdata[0x1]
@@ -72,8 +104,8 @@ function mapreduce_1d_gpu(
         return Base.mapreduce(f, op, h_src; init)
     end
 
-    # Each thread will handle two elements
-    num_per_block = 2 * block_size
+    # Each thread will handle four elements
+    num_per_block = 4 * block_size
     blocks = (len + num_per_block - 1) ÷ num_per_block
 
     if !isnothing(temp)

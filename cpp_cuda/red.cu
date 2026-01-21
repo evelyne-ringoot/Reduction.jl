@@ -49,6 +49,7 @@ benchmark_ms(double target_time_ms, int32_t num_iters_inner, Reset &&reset, F &&
         auto start = std::chrono::high_resolution_clock::now();
         for (int32_t i = 0; i < num_iters_inner; ++i) {
             f();
+            CUDA_CHECK(cudaDeviceSynchronize());
         }
         CUDA_CHECK(cudaDeviceSynchronize());
         auto end = std::chrono::high_resolution_clock::now();
@@ -69,6 +70,62 @@ struct TestData {
     std::map<int32_t, float*> sum_result;
 };
 
+namespace reduce {
+
+__inline__ __device__ void warpReduce(volatile float *sdata, int tid) {
+    sdata[tid] += sdata[tid + 32];
+    sdata[tid] += sdata[tid + 16];
+    sdata[tid] += sdata[tid + 8];
+    sdata[tid] += sdata[tid + 4];
+    sdata[tid] += sdata[tid + 2];
+    sdata[tid] += sdata[tid + 1]; 
+}
+__global__ void reduce(float *g_idata, float *g_odata) {
+    extern __shared__ float sdata[];
+
+    // each thread loads one element from global to shared mem
+    unsigned int tid = threadIdx.x;
+    unsigned int i = blockIdx.x*(blockDim.x*2) + threadIdx.x;
+    sdata[tid] = g_idata[i] + g_idata[i+blockDim.x];
+    __syncthreads();
+
+    // // do reduction in shared mem
+    for (unsigned int s=blockDim.x/2; s>0; s>>=1) {
+        if (tid < s)
+            sdata[tid] += sdata[tid + s];
+        __syncthreads();
+    }
+
+    // if (tid < 32) warpReduce(sdata, tid);
+
+    if (tid == 0) g_odata[blockIdx.x] = sdata[0];
+}
+
+void launch_reduce(int size, float* d_in, float* d_out, float* d_temp_storage, size_t temp_storage_bytes) {
+    
+    // printf("size of temp storage: %zu \n", temp_storage_bytes);
+    
+    int blockSize = 1024;
+    int num_blocks = (size + blockSize*2 - 1) / (blockSize*2);
+
+    while (num_blocks > 1) {
+        size_t sharedMemSize = blockSize * sizeof(float);
+
+        reduce<<<num_blocks, blockSize, sharedMemSize>>>(d_in, d_temp_storage);
+
+        size = num_blocks;
+        float* tmp = d_in;
+        d_in = d_temp_storage;
+        d_temp_storage = tmp;
+
+        num_blocks = (size + blockSize*2 - 1) / (blockSize*2);
+
+    }
+
+    // Final reduction
+    reduce<<<1, blockSize, blockSize * sizeof(float)>>>(d_in, d_out);
+}
+}
 
 
 enum class Phase {
@@ -109,7 +166,13 @@ void run_config( Phase phase,
             CURAND_CHECK(curandGenerateUniform(curandGen, a_gpu, size_in)); 
         },
         [&]() {
-            cub::DeviceReduce::Sum(d_temp_storage, temp_storage_bytes, a_gpu, d_sum, size_in);
+            // cub::DeviceReduce::Sum(d_temp_storage, temp_storage_bytes, a_gpu, d_sum, size_in);
+            reduce::launch_reduce(
+                size_in,
+                a_gpu,
+                d_sum,
+                (float*)d_temp_storage,
+                temp_storage_bytes);
         });
 
     CUDA_CHECK(cudaFree(a_gpu));

@@ -1,10 +1,11 @@
 name = "AcceleratedKernels"
 uuid = "6a4ca0a5-0e36-4168-a932-d9be78d558f1"
-authors = ["Andrei-Leonard Nicusan <leonard@evophase.co.uk> and contributors"]
 version = "0.4.3"
+authors = ["Andrei-Leonard Nicusan <leonard@evophase.co.uk> and contributors"]
 
 [deps]
 ArgCheck = "dce04be8-c92d-5529-be00-80e4d2c0e197"
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 GPUArraysCore = "46192b85-c4d5-4398-a991-12ede77f4527"
 KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
 Markdown = "d6f4376e-aef5-505a-96c1-9c027394607a"
@@ -13,11 +14,15 @@ UnsafeAtomics = "013be700-e6cd-48c3-b4a1-df204f14c38f"
 [weakdeps]
 oneAPI = "8f75cd03-7ff8-4ecb-9b8f-daf728133b1b"
 
+[sources]
+CUDA = {rev = "1893a95d6df4dad44a03593a85e846bead0fb829", url = "https://github.com/JuliaGPU/CUDA.jl.git"}
+
 [extensions]
 AcceleratedKernelsoneAPIExt = "oneAPI"
 
 [compat]
 ArgCheck = "2"
+CUDA = "5.9.5"
 GPUArraysCore = "0.2.0"
 KernelAbstractions = "0.9.34"
 Markdown = "1"

@@ -48,9 +48,9 @@ benchmark_ms(double target_time_ms, int32_t num_iters_inner, Reset &&reset, F &&
         CUDA_CHECK(cudaDeviceSynchronize());
         auto start = std::chrono::high_resolution_clock::now();
         for (int32_t i = 0; i < num_iters_inner; ++i) {
+            CUDA_CHECK(cudaDeviceSynchronize());
             f();
         }
-        CUDA_CHECK(cudaDeviceSynchronize());
         auto end = std::chrono::high_resolution_clock::now();
         double this_ms = std::chrono::duration<double, std::milli>(end - start).count();
         elapsed_ms += this_ms;

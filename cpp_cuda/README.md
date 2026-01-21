@@ -1,7 +1,7 @@
 compilation:
 
 ```
-nvcc --std=c++17 --expt-relaxed-constexpr -O3 -arch=sm_89 -o red red.cu -lcurand
+nvcc --std=c++17 --expt-relaxed-constexpr --usefastmath -O3 -arch=sm_89 -o red red.cu -lcurand
 ```
 
  On RTX4060 we get:

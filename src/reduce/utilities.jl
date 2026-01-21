@@ -44,7 +44,13 @@ function _mapreduce_nd_apply_init!(
     end
 end
 
-@inline function reduce_group!(@context, op, sdata, N, ithread)
+@inline function reduce_group!(@context, op, sdata, N, ithread, WARP)
+    if N >= 1024u16
+        if ithread < 512u16
+            sdata[ithread + 0x1] = op(sdata[ithread + 0x1], sdata[ithread + 512u16 + 0x1])
+        end
+        @synchronize()
+    end
     if N >= 512u16
         if ithread < 256u16
             sdata[ithread + 0x1] = op(sdata[ithread + 0x1], sdata[ithread + 256u16 + 0x1])
