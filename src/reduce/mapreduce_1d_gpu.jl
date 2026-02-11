@@ -1,6 +1,10 @@
+using KernelAbstractions.Extras: @unroll
+
 @kernel inbounds=true cpu=false unsafe_indices=true function _mapreduce_block!(
     @Const(src), dst, f, op, neutral,
-)
+    ::Val{THREAD_VALS} = Val(2),
+) where {THREAD_VALS}
+
     @uniform N = @groupsize()[1]
     sdata = @localmem eltype(dst) (N,)
 
@@ -15,55 +19,35 @@
     iblock = @index(Group, Linear) - 0x1
     ithread = @index(Local, Linear) - 0x1
 
+    @uniform TV = THREAD_VALS
+
     reg_accum = neutral
-    i = (ithread * 0x4) + iblock * (N * 0x4) # each thread handles four elements
+    i = ithread + iblock * (N * TV) # each thread handles eight elements strided by N
     if i >= len
         sdata[ithread + 0x1] = neutral
-    elseif i + N  >= len
-        for j in 0x0:0x3
-            idx = i + j
+    elseif i + N * TV >= len
+        for j in 0x0:(TV)   
+            idx = i + N * j
             if idx < len
-                # reg_accum = op(reg_accum, f(src[idx + 0x1]))
-                reg_accum += src[idx + 0x1]
+                reg_accum = op(reg_accum, f(src[idx + 0x1]))
             end
         end
+        sdata[ithread + 0x1] = reg_accum
     else
-        reg_accum = op(f(src[i + 0x1]),
-                       f(src[i + 0x2]),
-                       f(src[i + 0x3]),
-                       f(src[i + 0x4]))
-        # reg_accum = src[i + 0x1] + src[i + 0x2] + src[i + 0x3] + src[i + 0x4]
+        @unroll for j in 0:(TV - 1)
+            reg_accum = op(reg_accum, f(src[i + N * j + 0x1]))
+        end
+        sdata[ithread + 0x1] = reg_accum
     end
 
-    sdata[ithread + 0x1] = reg_accum
-    # elseif i + N >= len
-    #     sdata[ithread + 0x1] = f(src[i + 0x1])
-    # else
-    #     sdata[ithread + 0x1] = op(f(src[i + 0x1]), f(src[i + N + 0x1]))
-    # end
     @synchronize()
 
-    @uniform WARP = W
-    @inline reduce_group!(@context, op, sdata, N, ithread, WARP)
+    @inline reduce_group!(@context, op, sdata, N, ithread)
 
-
-    # step = N
-    # while step > 0
-    #     if N >= step
-    #         if ithread < step ÷ 2
-    #             sdata[ithread + 0x1] =
-    #                 op(sdata[ithread + 0x1],
-    #                    sdata[ithread + step ÷ 2 + 0x1])
-    #         end
-    #         @synchronize()
-    #     end
-    #     step ÷= 2
-    # end
-
+    # OLD COMMENT: would only work with a `volatile keyword`
     # Code below would work on NVidia GPUs with warp size of 32, but create race conditions and
     # return incorrect results on Intel Graphics. It would be useful to have a way to statically
     # query the warp size at compile time
-    
     # if ithread < 32
     #   N >= 64 && (sdata[ithread + 1] = op(sdata[ithread + 1], sdata[ithread + 32 + 1]))
     #   N >= 32 && (sdata[ithread + 1] = op(sdata[ithread + 1], sdata[ithread + 16 + 1]))
@@ -95,6 +79,8 @@ function mapreduce_1d_gpu(
     @argcheck 1 <= block_size <= 1024
     @argcheck switch_below >= 0
 
+    THREAD_VALS = 2
+
     # Degenerate cases
     len = length(src)
     len == 0 && return init
@@ -104,8 +90,8 @@ function mapreduce_1d_gpu(
         return Base.mapreduce(f, op, h_src; init)
     end
 
-    # Each thread will handle four elements
-    num_per_block = 4 * block_size
+    # Each thread will handle THREAD_VALS elements
+    num_per_block = THREAD_VALS * block_size
     blocks = (len + num_per_block - 1) ÷ num_per_block
 
     if !isnothing(temp)
@@ -124,7 +110,7 @@ function mapreduce_1d_gpu(
     dst_view = @view dst[1:blocks]
 
     kernel! = _mapreduce_block!(backend, block_size)
-    kernel!(src_view, dst_view, f, op, neutral, ndrange=(block_size * blocks,))
+    kernel!(src_view, dst_view, f, op, neutral, Val(THREAD_VALS), ndrange=(block_size * blocks,))
 
     # As long as we still have blocks to process, swap between the src and dst pointers at
     # the beginning of the first and second halves of dst
@@ -142,7 +128,7 @@ function mapreduce_1d_gpu(
         blocks = (len + num_per_block - 1) ÷ num_per_block
 
         # Each block produces one reduced value
-        kernel!(p1, p2, identity, op, neutral, ndrange=(block_size * blocks,))
+        kernel!(p1, p2, identity, op, neutral, Val(THREAD_VALS),ndrange=(block_size * blocks,))
         len = blocks
 
         if len < switch_below

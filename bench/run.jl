@@ -3,7 +3,7 @@ using CUDA, KernelAbstractions, Printf, Random
 using KernelAbstractions: @context
 using ArgCheck: @argcheck
 using GPUArraysCore: @allowscalar
-const backend=CUDABackend(false, false, true)
+const backend = CUDABackend()
 include("benchmark.jl")
 include("../src/utils.jl")
 include("../src/reduce/utilities.jl")
@@ -49,8 +49,6 @@ end
 println("testing correctness")
 global is_correct = true
 for (i,size_i) in enumerate(sizes)
-    tmp_backend = CUDABackend(false, false, true)
-
     host_a = randn(Float32, size_i)
     expected = sum(Float32, host_a)
 
@@ -60,11 +58,11 @@ for (i,size_i) in enumerate(sizes)
     copyto!(a, host_a)
 
     temp_size = calc_temp_size(size_i)
-    temp = KernelAbstractions.zeros(tmp_backend, Float32, temp_size)
-    println("backend: ", backend)
-    println("temp backend: ", get_backend(tmp_backend))
+    temp = KernelAbstractions.zeros(backend, Float32, temp_size)
 
-    @argcheck get_backend(temp) === backend
+    # println("backend: ", backend)
+    # println("temp backend: ", get_backend(temp))
+    # @argcheck tmp_backend === backend
     
     actual = sum_array(a, temp)
     
