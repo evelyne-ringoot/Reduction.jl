@@ -79,7 +79,11 @@ function mapreduce_1d_gpu(
     @argcheck 1 <= block_size <= 1024
     @argcheck switch_below >= 0
 
-    THREAD_VALS = 2
+    thread_vals(::CUDA.CUDABackend) = 4
+    thread_vals(::AMDGPU.ROCBackend) = 8
+    thread_vals(::Backend) = 2  
+
+    THREAD_VALS = thread_vals(backend)
 
     # Degenerate cases
     len = length(src)

@@ -1,5 +1,6 @@
 # change if you have a different GPU
 using CUDA, KernelAbstractions, Printf, Random
+using AMDGPU
 using KernelAbstractions: @context
 using ArgCheck: @argcheck
 using GPUArraysCore: @allowscalar
@@ -11,7 +12,7 @@ include("../src/reduce/mapreduce_1d_gpu.jl")
 include("../src/reduce/mapreduce_nd_v2.jl")
 
 # Function to sum array using mapreduce_1d_gpu with pre-allocated temp
-function sum_array(a, temp)
+function gpu_sum(a, temp)
     return mapreduce_1d_gpu(
         identity, +, a, backend;
         init=zero(eltype(a)),
@@ -24,8 +25,7 @@ function sum_array(a, temp)
     )
 end
 
-
-function sum_array_2d(a, temp)
+function gpu_sum_2d(a, temp)
     mapreducedim!(identity, +, temp, a; init=0.0f0)
     return temp
 end
@@ -45,26 +45,19 @@ function mapreduce_1d_serial(
     return result
 end
 
-
 println("testing correctness")
 global is_correct = true
 for (i,size_i) in enumerate(sizes)
     host_a = randn(Float32, size_i)
     expected = sum(Float32, host_a)
-
     # run on gpu
-    # a = KernelAbstractions.allocate(backend, Float32, size_i)
     a = KernelAbstractions.zeros(backend, Float32, size_i)
     copyto!(a, host_a)
 
     temp_size = calc_temp_size(size_i)
     temp = KernelAbstractions.zeros(backend, Float32, temp_size)
-
-    # println("backend: ", backend)
-    # println("temp backend: ", get_backend(temp))
-    # @argcheck tmp_backend === backend
     
-    actual = sum_array(a, temp)
+    actual = gpu_sum(a, temp)
     
     if !isapprox(actual, expected; rtol=1e-5, atol=1e-3)
         println("results do not match for size $size_i: gpu $actual vs cpu $expected")
@@ -81,12 +74,12 @@ if is_correct
     println( "warmup ");
 
     for (i,size_i) in enumerate(sizes)
-        timings[i] = min( benchmark_ms(size_i, sum_array, Float32), timings[i])
+        timings[i] = min( benchmark_ms(size_i, gpu_sum, Float32), timings[i])
     end
 
     println( "run ");
     for (i,size_i) in enumerate(sizes)
-        timings[i] = min( benchmark_ms(size_i, sum_array, Float32), timings[i])
+        timings[i] = min( benchmark_ms(size_i, gpu_sum, Float32), timings[i])
     end
 
     println( " size_i    time (ms)");
@@ -97,31 +90,94 @@ if is_correct
     flush(stdout)
 
     # 2d benchmarks
-    sizes_2d = [
-        (32*1024, 1024),
-        (1024, 1024*32),
-        (32, 1024*1024),
-        (1024*1024, 32)
-    ]
+    # sizes_2d = [
+    #     (32*1024, 1024),
+    #     (1024, 1024*32),
+    #     (32, 1024*1024),
+    #     (1024*1024, 32)
+    # ]
+    # timings_2d = ones(length(sizes_2d)) * 10000000
+    # println("warmup");
+    # for (i, (size_in1, size_in2)) in enumerate(sizes_2d)
+    #     timings_2d[i] = min(benchmark_ms_2d(size_in1, size_in2, gpu_sum_2d, Float32), timings_2d[i])
+    # end
+    # println("run");
+    # for (i, (size_in1, size_in2)) in enumerate(sizes_2d)
+    #     timings_2d[i] = min(benchmark_ms_2d(size_in1, size_in2, gpu_sum_2d, Float32), timings_2d[i])
+    # end
+    # println(" size_in1 x size_in2    time (ms)");
+    # println(" -------------------   --------- ");
+    # for (i, (size_in1, size_in2)) in enumerate(sizes_2d)
+    #     @printf " %6d x %6d    %8.03f\n" size_in1 size_in2 timings_2d[i]
+    # end
+    # flush(stdout)
+end
+println("#########################")
+println("running adversarial tests")
+println("#########################")
+println("Case 1: Many small values + one large value")
+for (i,size_i) in enumerate(sizes)
+    a = KernelAbstractions.zeros(backend, Float32, size_i)
+    temp_size = calc_temp_size(size_i)
+    temp = KernelAbstractions.zeros(backend, Float32, temp_size)
 
-    timings_2d = ones(length(sizes_2d)) * 10000000
-    println("warmup");
+    small = 1f-12
+    large = 1f0
+    host_a = fill(small, size_i)
+    host_a[end] = large
+    copyto!(a, host_a)
 
-    for (i, (size_in1, size_in2)) in enumerate(sizes_2d)
-        timings_2d[i] = min(benchmark_ms_2d(size_in1, size_in2, sum_array_2d, Float32), timings_2d[i])
-    end
+    actual = gpu_sum(a, temp)
+    expected = sum(Float32, host_a)
+    println("expected: $expected")
+    println("actual $actual")
+    
+    KernelAbstractions.unsafe_free!(a)
+    KernelAbstractions.unsafe_free!(temp)  
+end
 
-    println("run");
-    for (i, (size_in1, size_in2)) in enumerate(sizes_2d)
-        timings_2d[i] = min(benchmark_ms_2d(size_in1, size_in2, sum_array_2d, Float32), timings_2d[i])
-    end
+println("#########################")
+println("Case 2: int overflow case")
+for (i,size_i) in enumerate(sizes)
+    a = KernelAbstractions.zeros(backend, Float32, size_i)
+    temp_size = calc_temp_size(size_i)
+    temp = KernelAbstractions.zeros(backend, Float32, temp_size)
 
-    println(" size_in1 x size_in2    time (ms)");
-    println(" -------------------   --------- ");
-    for (i, (size_in1, size_in2)) in enumerate(sizes_2d)
-        @printf " %6d x %6d    %8.03f\n" size_in1 size_in2 timings_2d[i]
-    end
-    flush(stdout)
+    host_a = fill(1f0, size_i)
+    host_a[end-5:end] .= 1f38
+
+    copyto!(a, host_a)
+
+    actual = gpu_sum(a, temp)
+    expected = sum(Float32, host_a)
+
+    println("expected: $expected")
+    println("actual $actual")
+    
+    KernelAbstractions.unsafe_free!(a)
+    KernelAbstractions.unsafe_free!(temp)
+end
+
+println("#########################")
+println("Case 2: int overflow case")
+for (i,size_i) in enumerate(sizes)
+    a = KernelAbstractions.zeros(backend, Float32, size_i)
+    temp_size = calc_temp_size(size_i)
+    temp = KernelAbstractions.zeros(backend, Float32, temp_size)
+
+    host_a = fill(1f0, size_i)
+    host_a[end-5:end] .= 1f38
+
+    copyto!(a, host_a)
+
+    actual = gpu_sum(a, temp)
+    expected = sum(Float32, host_a)
+
+    println("expected: $expected")
+    println("actual $actual")
+    
+    KernelAbstractions.unsafe_free!(a)
+    KernelAbstractions.unsafe_free!(temp)
 end
 
 
