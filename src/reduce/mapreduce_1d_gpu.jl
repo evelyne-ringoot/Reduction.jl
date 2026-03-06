@@ -22,7 +22,7 @@ using KernelAbstractions.Extras: @unroll
     @uniform TV = THREAD_VALS
 
     reg_accum = neutral
-    i = ithread + iblock * (N * TV) # each thread handles eight elements strided by N
+    i = ithread + iblock * (N * TV) # each thread handles TV (thread_vals) elements strided by N
     if i >= len
         sdata[ithread + 0x1] = neutral
     elseif i + N * TV >= len
@@ -44,7 +44,7 @@ using KernelAbstractions.Extras: @unroll
 
     @inline reduce_group!(@context, op, sdata, N, ithread)
 
-    # OLD COMMENT: would only work with a `volatile keyword`
+    # OLD COMMENT: would only work with a `volatile` keyword
     # Code below would work on NVidia GPUs with warp size of 32, but create race conditions and
     # return incorrect results on Intel Graphics. It would be useful to have a way to statically
     # query the warp size at compile time
@@ -63,8 +63,8 @@ end
 
 
 function mapreduce_1d_gpu(
-    f, op, src::AbstractArray, backend::Backend;
-    init,
+    f, op, src::AbstractArray{T}, backend::Backend, dst_type::Type{U} = T;
+    init,  
     neutral,
 
     # CPU settings - ignored here
@@ -75,10 +75,11 @@ function mapreduce_1d_gpu(
     block_size::Int,
     temp::Union{Nothing, AbstractArray},
     switch_below::Int,
-)
+) where {T, U}
     @argcheck 1 <= block_size <= 1024
     @argcheck switch_below >= 0
 
+    # Hyperparameters 
     thread_vals(::CUDA.CUDABackend) = 4
     thread_vals(::AMDGPU.ROCBackend) = 8
     thread_vals(::Backend) = 2  
@@ -105,7 +106,7 @@ function mapreduce_1d_gpu(
         dst = temp
     else
         # Figure out type for destination
-        dst_type = typeof(init)
+        # dst_type = typeof(init)
         dst = KernelAbstractions.allocate(backend, dst_type, blocks * 2)
     end
 

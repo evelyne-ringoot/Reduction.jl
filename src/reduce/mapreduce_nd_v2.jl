@@ -87,7 +87,10 @@ Base.@propagate_inbounds _map_getindex(args::Tuple{}, I) = ()
 end
 
 ## COV_EXCL_STOP
-
+"""
+A: input array to be reduced
+R: preallocated output array
+"""
 function mapreducedim!(f::F, op::OP, R::AnyGPUArray{T}, A::AbstractArrayOrBroadcasted;
                                  init=nothing) where {F, OP, T}
     Base.check_reducedims(R, A)
