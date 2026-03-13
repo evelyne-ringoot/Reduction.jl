@@ -10,10 +10,17 @@ include("../src/utils.jl")
 include("../src/reduce/utilities.jl")
 include("../src/reduce/mapreduce_1d_gpu.jl")
 include("../src/reduce/mapreduce_nd_v2.jl")
+include("../src/reduce/mapreduce_nd_v3.jl")
+
 
 # Function to sum array using nd mapreduce with pre-allocated temp
-function gpu_reduce_nd(a, temp)
+function gpu_reduce_nd_v2(a, temp)
     mapreducedim!(identity, +, temp, a; init=0.0f0)
+    return temp
+end
+
+function gpu_reduce_nd_v3(a, temp)
+    mapreducedim_v3!(identity, +, temp, a; init=0.0f0)
     return temp
 end
 
@@ -57,23 +64,32 @@ function mapreduce_2d_serial(
     return result
 end
 
-# Correctness Check
-function mapreduce_3d_serial( 
+# correctness test
+function mapreduce_nd_serial(
     f, op, src::AbstractArray;
     init,
-    dim,
+    dim::Int
 )
-    result = init
-    for i in eachindex(src)
-        result = op(result, f(src[i]))
+
+    dims = size(src)
+
+    # output shape (collapse reduction dimension)
+    out_dims = collect(dims)
+    out_dims[dim] = 1
+
+    result = fill(init, Tuple(out_dims))
+
+    for I in CartesianIndices(src)
+        out_index = Tuple(ntuple(d -> d == dim ? 1 : I[d], ndims(src)))
+        result[out_index...] = op(result[out_index...], f(src[I]))
     end
+
     return result
 end
 
 #########
 # 2D tests
 #########
-
 
 # println("testing correctness")
 # global is_correct = true
@@ -117,15 +133,70 @@ end
 #     flush(stdout)
 # end
 
+
 # 3D 
+println("testing correctness")
+global is_correct = true
+for (i, (s1, s2, s3)) in enumerate(sizes_3d)
+    sizes = (s1, s2, s3)
+    host_a = randn(Float32, s1, s2, s3)
+
+    a = KernelAbstractions.zeros(backend, Float32, sizes)
+    copyto!(a, host_a)
+    for reduce_dim in 1:3
+       
+        expected = mapreduce_nd_serial(identity, +, host_a; init=0f0, dim=reduce_dim)
+
+        # reduced shape is same as input but reduced dim becomes 1
+        out_sizes = ntuple(d -> d == reduce_dim ? 1 : sizes[d], 3)
+        temp = KernelAbstractions.zeros(backend, Float32, out_sizes)
+
+        # run on gpu
+        actual = gpu_reduce_nd_v3(a, temp)
+        actual_host = Array(actual)
+        
+        if !all(isapprox.(actual_host, expected; rtol=1e-2, atol=1e-2))
+            println("results do not match for sizes ($sizes)")
+            global is_correct = false
+        end
+
+        KernelAbstractions.unsafe_free!(a)
+        KernelAbstractions.unsafe_free!(temp)
+    end
+end
 
 for reduce_dim in 1:3
-
     timings_3d = ones(length(sizes_3d)) * 1e7
+    # println("ORIGINAL IMPLEMENTATION")
+    # println("warmup");
+    # for (i, sizes) in enumerate(sizes_3d)
+    #     timings_3d[i] = min(
+    #         benchmark_ms_3d(sizes, reduce_dim, gpu_reduce_nd_v2, Float32),
+    #         timings_3d[i]
+    #     )
+    # end
+
+    # println("run");
+    # for (i, sizes) in enumerate(sizes_3d)
+    #     timings_3d[i] = min(
+    #         benchmark_ms_3d(sizes, reduce_dim, gpu_reduce_nd_v2, Float32),
+    #         timings_3d[i]
+    #     )
+    # end
+
+    # println("     size1 x     size2 x     size3   |   reduce_dim=$reduce_dim   |   time (ms)");
+    # println(" ------------------------------------   --------------------------   ---------");
+
+    # for (i, (s1, s2, s3)) in enumerate(sizes_3d)
+    #     @printf(" %8d x %8d x %8d      |        %2d          |  %8.03f\n",
+    #         s1, s2, s3, reduce_dim, timings_3d[i])
+    # end
+
+    # println("NEW IMPLEMENTATION")
     println("warmup");
     for (i, sizes) in enumerate(sizes_3d)
         timings_3d[i] = min(
-            benchmark_ms_3d(sizes, reduce_dim, gpu_reduce_nd, Float32),
+            benchmark_ms_3d(sizes, reduce_dim, gpu_reduce_nd_v3, Float32),
             timings_3d[i]
         )
     end
@@ -133,7 +204,7 @@ for reduce_dim in 1:3
     println("run");
     for (i, sizes) in enumerate(sizes_3d)
         timings_3d[i] = min(
-            benchmark_ms_3d(sizes, reduce_dim, gpu_reduce_nd, Float32),
+            benchmark_ms_3d(sizes, reduce_dim, gpu_reduce_nd_v3, Float32),
             timings_3d[i]
         )
     end
