@@ -11,6 +11,21 @@ include("../src/reduce/utilities.jl")
 include("../src/reduce/mapreduce_1d_gpu.jl")
 include("../src/reduce/mapreduce_nd_v2.jl")
 
+function format_size_factor(n)
+    power = 0
+    while n % 1024 == 0
+        n ÷= 1024
+        power += 1
+    end
+    if power == 0
+        return string(n)
+    elseif n == 1
+        return @sprintf("1024^%d", power)
+    else
+        return @sprintf("%d * 1024^%d", n, power)
+    end
+end
+
 # Function to sum array using mapreduce_1d_gpu with pre-allocated temp
 function gpu_sum(a, temp, dst_type::Type{U}) where {U}
     return mapreduce_1d_gpu(
@@ -25,7 +40,7 @@ function gpu_sum(a, temp, dst_type::Type{U}) where {U}
     )
 end
 
-sizes=[1024, 1024*32, 1024*1024, 1024*1024*32, 1024*1024*1024]
+sizes = [2^i for i in range(10, 31)]
 
 # Correctness Check
 # TODO: implement mixed precision here? 
@@ -56,7 +71,8 @@ for (i,size_i) in enumerate(sizes)
     actual = gpu_sum(a, temp, Float32)
     
     if !isapprox(actual, expected; rtol=1e-5, atol=1e-3)
-        println("results do not match for size $size_i: gpu $actual vs cpu $expected")
+        formatted_size = format_size_factor(size_i)
+        println("results do not match for size $formatted_size: gpu $actual vs cpu $expected")
         global is_correct = false
     end
 
@@ -81,7 +97,8 @@ if is_correct
     println( " size_i    time (ms)");
     println(" ------   --------- ");
     for (i,size_i) in enumerate(sizes)
-        @printf " %6d    %8.03f\n" size_i timings[i]
+        formatted_size = format_size_factor(size_i)
+        @printf " %6s    %8.03f\n" formatted_size timings[i]
     end  
     flush(stdout)
 end
@@ -89,43 +106,34 @@ end
 println("#########################")
 println("running adversarial tests")
 println("#########################")
-println("Case 1: Many small values + one large value")
-for (i,size_i) in enumerate(sizes)
-    a = KernelAbstractions.zeros(backend, Float32, size_i)
-    temp_size = calc_temp_size(size_i)
-    temp = KernelAbstractions.zeros(backend, Float32, temp_size)
 
-    small = 1f-12
-    large = 1f37
-    host_a = fill(small, size_i)
-    host_a[end] = large
-    copyto!(a, host_a)
-
-    actual = gpu_sum(a, temp, Float32)
-    expected = sum(Float32, host_a)
-    println("expected: $expected")
-    println("actual $actual")
-    
-    KernelAbstractions.unsafe_free!(a)
-    KernelAbstractions.unsafe_free!(temp)  
-end
-
+# entire reduction will overflow, but each single block 
 println("#########################")
-println("Case 2: int overflow case")
+println("int overflow case 2")
+
 for (i,size_i) in enumerate(sizes)
     a = KernelAbstractions.zeros(backend, Float32, size_i)
+    promoted_a = KernelAbstractions.zeros(backend, Float64, size_i)
+
     temp_size = calc_temp_size(size_i)
     temp = KernelAbstractions.zeros(backend, Float32, temp_size)
 
     host_a = fill(1f0, size_i)
-    host_a[end-5:end] .= 1f38 # Maximum julia value is ~3.48f38
+
+    if size_i > 1024
+        host_a[1:2048] .= 2f35 # Maximum julia value is ~3.48f38
+    else 
+        host_a[1:1024] .= 2f35 # Maximum julia value is ~3.48f38
+    end
 
     copyto!(a, host_a)
 
     actual = gpu_sum(a, temp, Float32)
     expected = sum(Float32, host_a)
+    expected_promoted = sum(Float64, host_a)
 
-    println("expected: $expected")
+    println("cpu result (without cast up): $expected")
+    println("cpu result (with cast up): $expected_promoted")
     println("actual $actual")
     
     KernelAbstractions.unsafe_free!(a)

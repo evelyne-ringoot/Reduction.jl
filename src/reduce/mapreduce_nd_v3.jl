@@ -92,10 +92,11 @@ function should_transpose(A, Rreduce, Rother)
     reduce_dims = [i for i in 1:ndims(A) if size(A,i) != 1 && 
                    any(r -> Tuple(r)[i] != 1, Rreduce)]
     
-    # Already reducing along dim 1 (contiguous) → no benefit
+    # return false if no reduction is needed
     1 in reduce_dims && return false, nothing
     
-    # Reduction dimension is large enough to justify transpose cost
+    # TODO: modify this heuristic
+    # check if the reduction size is large enough to justify the transpose overhead
     reduce_size = length(Rreduce)
     reduce_size < 1024 && return false, nothing
     
@@ -135,9 +136,15 @@ function mapreducedim_v3!(f::F, op::OP, R::AnyGPUArray{T}, A::AbstractArrayOrBro
         # println("transposing")
         all_dims   = 1:ndims(A)
         other_dims = [d for d in all_dims if d ∉ reduce_dims]
-        perm       = (reduce_dims..., other_dims...)  # reduction dims → dim 1
+        perm       = (reduce_dims..., other_dims...)  # reduction dims -> dim 1
 
-        A_t = permutedims(A, perm)   # new contiguous layout
+        # if A isa CuMatrix && ndims(A) == 2
+        #     m, n = size(A)
+        #     C = similar(A, (n, m))   # explicitly allocate transposed output
+        #     A_t = CUBLAS.geam!('T', 'N', one(eltype(A)), A, zero(eltype(A)), C, C)
+        # else 
+        A_t = permutedims(A, perm)  
+        # end
 
         # recompute R for transposed layout
         R_size_t = ntuple(i -> i <= length(reduce_dims) ? 1 : size(A, other_dims[i - length(reduce_dims)]), ndims(A))

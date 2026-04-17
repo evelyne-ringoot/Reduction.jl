@@ -14,9 +14,6 @@ UnsafeAtomics = "013be700-e6cd-48c3-b4a1-df204f14c38f"
 [weakdeps]
 oneAPI = "8f75cd03-7ff8-4ecb-9b8f-daf728133b1b"
 
-[sources]
-CUDA = {rev = "1893a95d6df4dad44a03593a85e846bead0fb829", url = "https://github.com/JuliaGPU/CUDA.jl.git"}
-
 [extensions]
 AcceleratedKernelsoneAPIExt = "oneAPI"
 

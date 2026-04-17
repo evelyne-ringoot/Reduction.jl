@@ -27,11 +27,29 @@ end
 # sizes=[1024, 1024*32, 1024*1024, 1024*1024*32, 1024*1024*1024]
 # reducing over the second dimension 
 sizes_2d = [
-        (32*1024, 1024),
-        (1024, 1024*32),
-        (32, 1024*1024),
-        (1024*1024, 32)
-    ]
+    # square-ish
+    (1024,   1024),
+    (4096,   4096),
+    (8192,   8192),
+    (16384,  16384),
+
+    # tall and thin
+    (32*1024,    1024),
+    (128*1024,   1024),
+    (1024*1024,  32),
+    (1024*1024,  128),
+    (1024*1024,  512),
+
+    # wide and short
+    (1024,   32*1024),
+    (1024,   128*1024),
+    (32,     1024*1024),
+    (128,    1024*1024),
+    (512,    1024*1024),
+
+    # large square
+    (32768,  32768),
+]
 
 sizes_3d = [
     (32*1024, 32, 32), # different locations for large dimension
@@ -91,47 +109,48 @@ end
 # 2D tests
 #########
 
-# println("testing correctness")
-# global is_correct = true
-# for (i, (size_in1, size_in2)) in enumerate(sizes_2d)
-#     host_a = randn(Float32, size_in1, size_in2)
-#     expected = mapreduce_2d_serial(identity, +, host_a; init=0)
-#     # run on gpu
-#     a = KernelAbstractions.zeros(backend, Float32, size_in1, size_in2)
-#     copyto!(a, host_a)
+println("testing correctness")
+global is_correct = true
+for (i, (size_in1, size_in2)) in enumerate(sizes_2d)
+    host_a = randn(Float32, size_in1, size_in2)
+    expected = mapreduce_2d_serial(identity, +, host_a; init=0)
+    # run on gpu
+    a = KernelAbstractions.zeros(backend, Float32, size_in1, size_in2)
+    copyto!(a, host_a)
 
-#     temp = KernelAbstractions.zeros(backend, Float32, size_in1, 1)
+    temp = KernelAbstractions.zeros(backend, Float32, size_in1, 1)
 
-#     actual = gpu_reduce_nd(a, temp)
-#     actual_host = Array(actual)
+    actual = gpu_reduce_nd_v3(a, temp)
+    actual_host = Array(actual)
     
-#     if !all(isapprox.(actual_host, expected; rtol=1e-2, atol=1e-2))
-#         println("results do not match for size ($size_in1, $size_in2)")
-#         global is_correct = false
-#     end
+    if !all(isapprox.(actual_host, expected; rtol=1e-2, atol=1e-2))
+        println("results do not match for size ($size_in1, $size_in2)")
+        global is_correct = false
+    end
 
-#     KernelAbstractions.unsafe_free!(a)
-#     KernelAbstractions.unsafe_free!(temp)
-# end
+    KernelAbstractions.unsafe_free!(a)
+    KernelAbstractions.unsafe_free!(temp)
+end
 
-# if is_correct
-#     # 2d benchmarks
-#     timings_2d = ones(length(sizes_2d)) * 10000000
-#     println("warmup");
-#     for (i, (size_in1, size_in2)) in enumerate(sizes_2d)
-#         timings_2d[i] = min(benchmark_ms_2d(size_in1, size_in2, gpu_reduce_nd, Float32), timings_2d[i])
-#     end
-#     println("run");
-#     for (i, (size_in1, size_in2)) in enumerate(sizes_2d)
-#         timings_2d[i] = min(benchmark_ms_2d(size_in1, size_in2, gpu_reduce_nd, Float32), timings_2d[i])
-#     end
-#     println(" size_in1 x size_in2    time (ms)");
-#     println(" -------------------   --------- ");
-#     for (i, (size_in1, size_in2)) in enumerate(sizes_2d)
-#         @printf " %6d x %6d    %8.03f\n" size_in1 size_in2 timings_2d[i]
-#     end
-#     flush(stdout)
-# end
+if is_correct
+    println("implementation correct")
+    # 2d benchmarks
+    timings_2d = ones(length(sizes_2d)) * 10000000
+    println("warmup");
+    for (i, (size_in1, size_in2)) in enumerate(sizes_2d)
+        timings_2d[i] = min(benchmark_ms_2d(size_in1, size_in2, gpu_reduce_nd_v3, Float32), timings_2d[i])
+    end
+    println("run");
+    for (i, (size_in1, size_in2)) in enumerate(sizes_2d)
+        timings_2d[i] = min(benchmark_ms_2d(size_in1, size_in2, gpu_reduce_nd_v3, Float32), timings_2d[i])
+    end
+    println(" size_in1 x size_in2    time (ms)");
+    println(" -------------------   --------- ");
+    for (i, (size_in1, size_in2)) in enumerate(sizes_2d)
+        @printf " %6d x %6d    %8.03f\n" size_in1 size_in2 timings_2d[i]
+    end
+    flush(stdout)
+end
 
 
 # 3D 
@@ -165,61 +184,61 @@ for (i, (s1, s2, s3)) in enumerate(sizes_3d)
     end
 end
 
-for reduce_dim in 1:3
-    timings_3d = ones(length(sizes_3d)) * 1e7
-    # println("ORIGINAL IMPLEMENTATION")
-    # println("warmup");
-    # for (i, sizes) in enumerate(sizes_3d)
-    #     timings_3d[i] = min(
-    #         benchmark_ms_3d(sizes, reduce_dim, gpu_reduce_nd_v2, Float32),
-    #         timings_3d[i]
-    #     )
-    # end
+if is_correct
+    println("implementation correct")
+    for reduce_dim in 1:3
+        timings_3d = ones(length(sizes_3d)) * 1e7
+        # println("ORIGINAL IMPLEMENTATION")
+        # println("warmup");
+        # for (i, sizes) in enumerate(sizes_3d)
+        #     timings_3d[i] = min(
+        #         benchmark_ms_3d(sizes, reduce_dim, gpu_reduce_nd_v2, Float32),
+        #         timings_3d[i]
+        #     )
+        # end
+        # println("run");
+        # for (i, sizes) in enumerate(sizes_3d)
+        #     timings_3d[i] = min(
+        #         benchmark_ms_3d(sizes, reduce_dim, gpu_reduce_nd_v2, Float32),
+        #         timings_3d[i]
+        #     )
+        # end
+        # println("     size1 x     size2 x     size3   |   reduce_dim=$reduce_dim   |   time (ms)");
+        # println(" ------------------------------------   --------------------------   ---------");
 
-    # println("run");
-    # for (i, sizes) in enumerate(sizes_3d)
-    #     timings_3d[i] = min(
-    #         benchmark_ms_3d(sizes, reduce_dim, gpu_reduce_nd_v2, Float32),
-    #         timings_3d[i]
-    #     )
-    # end
+        # for (i, (s1, s2, s3)) in enumerate(sizes_3d)
+        #     @printf(" %8d x %8d x %8d      |        %2d          |  %8.03f\n",
+        #         s1, s2, s3, reduce_dim, timings_3d[i])
+        # end
 
-    # println("     size1 x     size2 x     size3   |   reduce_dim=$reduce_dim   |   time (ms)");
-    # println(" ------------------------------------   --------------------------   ---------");
+        # println("NEW IMPLEMENTATION")
+        println("warmup");
+        for (i, sizes) in enumerate(sizes_3d)
+            timings_3d[i] = min(
+                benchmark_ms_3d(sizes, reduce_dim, gpu_reduce_nd_v3, Float32),
+                timings_3d[i]
+            )
+        end
 
-    # for (i, (s1, s2, s3)) in enumerate(sizes_3d)
-    #     @printf(" %8d x %8d x %8d      |        %2d          |  %8.03f\n",
-    #         s1, s2, s3, reduce_dim, timings_3d[i])
-    # end
+        println("run");
+        for (i, sizes) in enumerate(sizes_3d)
+            timings_3d[i] = min(
+                benchmark_ms_3d(sizes, reduce_dim, gpu_reduce_nd_v3, Float32),
+                timings_3d[i]
+            )
+        end
 
-    # println("NEW IMPLEMENTATION")
-    println("warmup");
-    for (i, sizes) in enumerate(sizes_3d)
-        timings_3d[i] = min(
-            benchmark_ms_3d(sizes, reduce_dim, gpu_reduce_nd_v3, Float32),
-            timings_3d[i]
-        )
+        println("     size1 x     size2 x     size3   |   reduce_dim=$reduce_dim   |   time (ms)");
+        println(" ------------------------------------   --------------------------   ---------");
+
+        for (i, (s1, s2, s3)) in enumerate(sizes_3d)
+            @printf(" %8d x %8d x %8d      |        %2d          |  %8.03f\n",
+                s1, s2, s3, reduce_dim, timings_3d[i])
+        end
+
+        flush(stdout)
     end
-
-    println("run");
-    for (i, sizes) in enumerate(sizes_3d)
-        timings_3d[i] = min(
-            benchmark_ms_3d(sizes, reduce_dim, gpu_reduce_nd_v3, Float32),
-            timings_3d[i]
-        )
-    end
-
-    println("     size1 x     size2 x     size3   |   reduce_dim=$reduce_dim   |   time (ms)");
-    println(" ------------------------------------   --------------------------   ---------");
-
-    for (i, (s1, s2, s3)) in enumerate(sizes_3d)
-        @printf(" %8d x %8d x %8d      |        %2d          |  %8.03f\n",
-            s1, s2, s3, reduce_dim, timings_3d[i])
-    end
-
-    flush(stdout)
 end
-
 
 
 

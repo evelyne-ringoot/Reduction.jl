@@ -106,3 +106,114 @@ end
         @synchronize()
     end
 end
+
+@inline function reduce_group_promoted!(@context, op, sdata, sdata_promoted, N, ithread)
+    if N >= 1024u16
+        if ithread < 512u16
+            a = ithread + 0x1
+            b = ithread + 512u16 + 0x1
+            sdata[a] = op(sdata[a], sdata[b])
+            sdata_promoted[a] = op(sdata_promoted[a], sdata_promoted[b])
+        end
+        @synchronize()
+    end
+
+    if N >= 512u16
+        if ithread < 256u16
+            a = ithread + 0x1
+            b = ithread + 256u16 + 0x1
+
+            sdata[a] = op(sdata[a], sdata[b])
+            sdata_promoted[a] = op(sdata_promoted[a], sdata_promoted[b])
+        end
+        @synchronize()
+    end
+
+    if N >= 256u16
+        if ithread < 128u16
+            a = ithread + 0x1
+            b = ithread + 128u16 + 0x1
+
+            sdata[a] = op(sdata[a], sdata[b])
+            sdata_promoted[a] = op(sdata_promoted[a], sdata_promoted[b])
+        end
+        @synchronize()
+    end
+
+    if N >= 128u16
+        if ithread < 64u16
+            a = ithread + 0x1
+            b = ithread + 64u16 + 0x1
+
+            sdata[a] = op(sdata[a], sdata[b])
+            sdata_promoted[a] = op(sdata_promoted[a], sdata_promoted[b])
+        end
+        @synchronize()
+    end
+
+    if N >= 64u16
+        if ithread < 32u16
+            a = ithread + 0x1
+            b = ithread + 32u16 + 0x1
+
+            sdata[a] = op(sdata[a], sdata[b])
+            sdata_promoted[a] = op(sdata_promoted[a], sdata_promoted[b])
+        end
+        @synchronize()
+    end
+
+    if N >= 32u16
+        if ithread < 16u16
+            a = ithread + 0x1
+            b = ithread + 16u16 + 0x1
+
+            sdata[a] = op(sdata[a], sdata[b])
+            sdata_promoted[a] = op(sdata_promoted[a], sdata_promoted[b])
+        end
+        @synchronize()
+    end
+
+    if N >= 16u16
+        if ithread < 8u16
+            a = ithread + 0x1
+            b = ithread + 8u16 + 0x1
+
+            sdata[a] = op(sdata[a], sdata[b])
+            sdata_promoted[a] = op(sdata_promoted[a], sdata_promoted[b])
+        end
+        @synchronize()
+    end
+
+    if N >= 8u16
+        if ithread < 4u16
+            a = ithread + 0x1
+            b = ithread + 4u16 + 0x1
+
+            sdata[a] = op(sdata[a], sdata[b])
+            sdata_promoted[a] = op(sdata_promoted[a], sdata_promoted[b])
+        end
+        @synchronize()
+    end
+
+    if N >= 4u16
+        if ithread < 2u16
+            a = ithread + 0x1
+            b = ithread + 2u16 + 0x1
+
+            sdata[a] = op(sdata[a], sdata[b])
+            sdata_promoted[a] = op(sdata_promoted[a], sdata_promoted[b])
+        end
+        @synchronize()
+    end
+
+    if N >= 2u16
+        if ithread < 1u16
+            a = ithread + 0x1
+            b = ithread + 1u16 + 0x1
+
+            sdata[a] = op(sdata[a], sdata[b])
+            sdata_promoted[a] = op(sdata_promoted[a], sdata_promoted[b])
+        end
+        @synchronize()
+    end
+end
