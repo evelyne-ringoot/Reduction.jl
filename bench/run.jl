@@ -4,7 +4,8 @@ using AMDGPU
 using KernelAbstractions: @context
 using ArgCheck: @argcheck
 using GPUArraysCore: @allowscalar
-const backend = CUDABackend()
+# const backend = CUDABackend()
+const backend = ROCBackend()
 include("benchmark.jl")
 include("../src/utils.jl")
 include("../src/reduce/utilities.jl")
